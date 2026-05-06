@@ -92,7 +92,9 @@ def _connect_radio(radio):
         else:
             stx = "Radio responded as %s, not %s." % (resp, xid)
             raise errors.RadioError(stx)
-    raise errors.RadioError("No response from radio")
+    if resp:
+        raise errors.RadioError("Unexpected response from radio")
+    raise errors.RadioNoResponse()
 
 
 def _update_status(self, status, step=1):
@@ -208,6 +210,8 @@ class KenwoodTMx710Radio(chirp_common.CloneModeRadio):
         try:
             _connect_radio(self)
             self._write_mem()
+        except errors.RadioError:
+            raise
         except Exception:
             # If anything unexpected happens, make sure we raise
             # a RadioError and log the problem
@@ -390,8 +394,6 @@ class KenwoodTMx710Radio(chirp_common.CloneModeRadio):
                 _mem.tmode = 0x0a
             if mem.tmode == "DTCS":
                 _mem.tmode = 0x09
-        if mem.duplex == "n/a":     # Not valid
-            mem.duplex = ""
         _mem.duplex = TMD710_DUPLEX.index(mem.duplex)
         _mem.offset = mem.offset
         _mem.tstep = TMD710_STEPS.index(mem.tuning_step)

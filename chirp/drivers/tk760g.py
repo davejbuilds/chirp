@@ -18,6 +18,7 @@ import struct
 import time
 
 from chirp import chirp_common, directory, memmap, errors, util, bitwise
+from chirp import checksum
 from chirp.settings import RadioSettingGroup, RadioSetting, \
     RadioSettingValueBoolean, RadioSettingValueList, \
     RadioSettingValueString, RadioSettingValueInteger, \
@@ -362,14 +363,6 @@ def _close_radio(radio):
     _raw_send(radio, b"E")
 
 
-def _checksum(data):
-    """the radio block checksum algorithm"""
-    cs = 0
-    for byte in data:
-        cs += byte
-    return cs % 256
-
-
 def _make_frame(cmd, addr):
     """Pack the info in the format it likes"""
     return struct.pack(">BH", ord(cmd), addr)
@@ -417,7 +410,7 @@ def _recv(radio):
     # when the RX block has two bytes and the first is \x5A
     # then the block is all \xFF
     if not cmd:
-        raise errors.RadioError('No response from radio')
+        raise errors.RadioNoResponse()
     elif cmd == b'Z':
         # Empty "zero" block
         _raw_recv(radio, 1)
@@ -432,7 +425,7 @@ def _recv(radio):
         rxdata = _raw_recv(radio, BLOCK_SIZE + 1)
         rcs = rxdata[-1]
         data = rxdata[:-1]
-        ccs = _checksum(data)
+        ccs = checksum.checksum_8bit(data)
 
         if rcs != ccs:
             _close_radio(radio)
@@ -462,6 +455,9 @@ def _open_radio(radio, status):
 
     _raw_send(radio, b"PROGRAM")
     ack = _raw_recv(radio, 1)
+    if not ack:
+        _close_radio(radio)
+        raise errors.RadioNoResponse()
     if ack != ACK_CMD:
         _close_radio(radio)
         LOG.debug("Radio did not accept PROGRAM command")
@@ -584,7 +580,7 @@ def do_upload(radio):
         if data == EMPTY_BLOCK:
             frame = _make_frame(b"Z", addr) + b"\xFF"
         else:
-            cs = _checksum(data)
+            cs = checksum.checksum_8bit(data)
             frame = _make_frame(b"W", addr) + data + bytes([cs])
 
         _raw_send(radio, frame)
@@ -859,6 +855,8 @@ class Kenwood_Series_60G(chirp_common.CloneModeRadio,
         # chirp signature on the eprom ;-)
         sign = b"Chirp"
         self._fill(0xbb, sign)
+        if self._memobj is None:
+            self.process_mmap()
 
         try:
             self._prep_data()
@@ -1588,20 +1586,20 @@ class TK378G_Radios(Kenwood_Series_60G):
 
 @directory.register
 class TK372G_Radios(Kenwood_Series_60G):
-    """Kenwood TK-372 Radio [K/E/M/NE]"""
+    """Kenwood TK-372G Radio [K/K2/K3/K4]"""
     MODEL = "TK-372G"
     TYPE = b"P3720"
     VARIANTS = {
-        b"P3720\x06\xff": (32, 450, 470, "K"),
-        b"P3720\x07\xff": (32, 470, 490, "K1"),
-        b"P3720\x08\xff": (32, 490, 512, "K2"),
-        b"P3720\x09\xff": (32, 403, 430, "K3")
+        b"P3720\x06\xfb": (32, 450, 470, "K"),
+        b"P3720\x07\xfb": (32, 470, 490, "K2"),
+        b"P3720\x08\xfb": (32, 490, 512, "K3"),
+        b"P3720\x09\xfb": (32, 403, 430, "K4")
         }
 
 
 @directory.register
 class TK370G_Radios(Kenwood_Series_60G):
-    """Kenwood TK-370 Radio [K/E/M/NE]"""
+    """Kenwood TK-370G Radio [K/E/M/NE]"""
     MODEL = "TK-370G"
     TYPE = b"P3700"
     VARIANTS = {

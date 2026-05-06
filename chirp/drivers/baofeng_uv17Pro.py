@@ -108,6 +108,7 @@ def _sendmagic(radio, magic, response_len):
 
 
 def _do_ident(radio):
+    saw_data = False
     for ident in radio._idents:
         # Flush input buffer
         bfc._clean_buffer(radio)
@@ -116,6 +117,8 @@ def _do_ident(radio):
         LOG.debug('Sending ident magic: %r', ident)
         try:
             ack = _sendmagic(radio, ident, len(radio._fingerprint))
+            if ack:
+                saw_data = True
             if not ack.startswith(radio._fingerprint):
                 LOG.debug('Ack %r did not match fingerprint: %r', ack,
                           radio._fingerprint)
@@ -129,7 +132,9 @@ def _do_ident(radio):
             _sendmagic(radio, magic, resplen)
         return True
 
-    raise errors.RadioError("Radio did not respond as expected (A)")
+    if saw_data:
+        raise errors.RadioError("Unexpected response from radio")
+    raise errors.RadioNoResponse()
 
 
 def _download(radio):
@@ -1574,7 +1579,7 @@ class UV17ProGPSGMRS(UV17ProGPS):
 
     def _apply_gmrs_limits(self, mem):
         if mem.duplex == "off":
-            return mem
+            return mem.mode, mem.power
 
         if mem.duplex == "split":
             tx_freq = mem.offset
@@ -1586,21 +1591,29 @@ class UV17ProGPSGMRS(UV17ProGPS):
             tx_freq = mem.freq
 
         if tx_freq in bandplan_na.GMRS_HHONLY:
-            mem.mode = "NFM"
-            mem.power = self.POWER_LEVELS[self._low_power_index]
+            mode = "NFM"
+            power = self.POWER_LEVELS[self._low_power_index]
+        else:
+            mode = mem.mode
+            power = mem.power
 
-        return mem
+        return mode, power
 
     def get_memory(self, number):
         mem = super().get_memory(number)
         if mem.empty:
             return mem
-        return self._apply_gmrs_limits(mem)
+        mem.mode, mem.power = self._apply_gmrs_limits(mem)
+        return mem
 
     def set_memory(self, mem):
-        if not mem.empty:
-            mem = self._apply_gmrs_limits(mem)
         super().set_memory(mem)
+        mode, power = self._apply_gmrs_limits(mem)
+        _mem = self._get_raw_memory(mem.number)
+        if power is not None:
+            _mem.lowpower = self.POWER_LEVELS.index(power)
+        if mode is not None:
+            _mem.wide = mode == self.MODES[0]
 
     def validate_memory(self, mem):
         msgs = super().validate_memory(mem)
@@ -1732,6 +1745,21 @@ class MaxTalkerMT5RM(MaxTalkerP15):
 class BFK5Plus(BF5RM):
     VENDOR = "Baofeng"
     MODEL = "K5-Plus"
+
+
+@directory.register
+class BaofengUV5RMPlus(BF5RM):
+    VENDOR = "Baofeng"
+    MODEL = "UV-5RM Plus"
+
+    _magics = [(b"\x46", 16),
+               (b"\x4d", 15),
+               (b"\x53\x45\x4E\x44\x13\x0F\x0D\x13\x0E\x0E\x0E\x0D\x0A" +
+                b"\x0E\x0E\x02\x0F\x08\x04\x11\x0C\x00\x0D\x0E\x00", 1)]
+    _encrsym = 13
+    _has_pilot_tone = True
+    _has_send_id_delay = True
+    _has_scramble = True
 
 
 @directory.register

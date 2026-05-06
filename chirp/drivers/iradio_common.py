@@ -23,13 +23,6 @@ LOG = logging.getLogger(__name__)
 CMD_ACK = b"\x06"
 
 
-def checksum(data):
-    cs = 0
-    for byte in data:
-        cs += byte
-    return cs % 256
-
-
 def enter_programming_mode(serial, magic, timeout=0.25):
     previous_timeout = serial.timeout
     serial.timeout = timeout
@@ -41,6 +34,9 @@ def enter_programming_mode(serial, magic, timeout=0.25):
 
             if ack == CMD_ACK:
                 return
+
+            if not ack and attempt == 4:
+                raise errors.RadioNoResponse()
 
             LOG.debug(f"Attempt #{attempt + 1} failed, trying again")
 
